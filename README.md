@@ -2,9 +2,8 @@
 
 **An interactive, browser-based biostatistics tool for education and research.**  
 Built with R Shiny · Deployable via Shinylive on GitHub Pages · No server required · Free
-
-> Developed by [Raj Subedi](https://rajsubediresearch.com) · PhD Student, Epidemiology · Georgia State University
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20074293.svg)](https://doi.org/10.5281/zenodo.20074293)
+> Developed by [Raj Subedi](https://rajsubediresearch.com) · PhD Student, Epidemiology · Georgia State University
 ---
 
 ## Overview
