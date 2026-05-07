@@ -285,6 +285,19 @@ server <- function(input, output, session) {
     selectInput("excel_sheet", "Select sheet:", choices=sheets)
   })
 
+  # Dynamic upload options — separator for CSV/TXT, sheet for Excel
+  output$upload_options_ui <- renderUI({
+    req(input$user_file)
+    ext <- tolower(tools::file_ext(input$user_file$name))
+    if (ext %in% c("xlsx","xls")) {
+      uiOutput("sheet_selector_ui")
+    } else {
+      radioButtons("sep", "Separator:",
+                   choices=c(Comma=",", Tab="\t", Semicolon=";"),
+                   selected=",", inline=TRUE)
+    }
+  })
+
   active_data <- reactive({
     src <- input$data_source %||% "sample"
     if (src == "upload") {
@@ -338,16 +351,7 @@ server <- function(input, output, session) {
         conditionalPanel("input.data_source == 'upload'",
           fileInput("user_file", "Upload CSV, TXT, or Excel",
                     accept=c(".csv",".txt",".xlsx",".xls")),
-          conditionalPanel(
-            "input.user_file !== null && (input.user_file.name.endsWith('.csv') || input.user_file.name.endsWith('.txt'))",
-            radioButtons("sep", "Separator (CSV/TXT):",
-                         choices=c(Comma=",", Tab="\t", Semicolon=";"),
-                         inline=TRUE)
-          ),
-          conditionalPanel(
-            "input.user_file !== null && (input.user_file.name.endsWith('.xlsx') || input.user_file.name.endsWith('.xls'))",
-            uiOutput("sheet_selector_ui")
-          )
+          uiOutput("upload_options_ui")
         ),
         hr(),
         uiOutput("data_summary_ui")
