@@ -177,8 +177,7 @@ make_analysis_plot <- function(df, mt, outcome, exposure) {
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 ui <- fluidPage(
-  theme = bs_theme(bootswatch="flatly", primary="#2c7bb6",
-                   base_font=font_google("Inter")),
+  theme = bs_theme(bootswatch="flatly", primary="#2c7bb6"),
 
   tags$style(HTML("
     body { margin:0; padding:0; background:#f5f6fa; }
