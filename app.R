@@ -298,22 +298,42 @@ make_logit_diag_plots <- function(mod) {
     resid_prs = residuals(mod, type = "pearson"),
     leverage  = hatvalues(mod),
     cooks     = cooks.distance(mod),
-    obs       = seq_along(fitted(mod))
+    obs       = seq_along(fitted(mod)),
+    y         = mod$y
   )
 
-  # Calibration: predicted vs observed proportions (binned)
-  n_bins <- min(10, floor(nrow(df_diag) / 15))
-  df_diag$bin <- cut(df_diag$fitted, breaks = n_bins, include.lowest = TRUE)
-  cal <- aggregate(cbind(fitted, y = mod$y) ~ bin, data = df_diag,
-                   FUN = mean, na.rm = TRUE)
+  # Calibration: robust binning — at least 10 obs per bin
+  n        <- nrow(df_diag)
+  n_bins   <- max(3, min(10, floor(n / 15)))
+  df_diag$bin <- tryCatch({
+    cuts <- unique(quantile(df_diag$fitted,
+                            probs = seq(0, 1, length.out = n_bins + 1),
+                            na.rm = TRUE))
+    if (length(cuts) < 3) cuts <- c(0, 0.5, 1)
+    cut(df_diag$fitted, breaks = cuts, include.lowest = TRUE)
+  }, error = function(e) factor(rep(1, n)))
 
-  p1 <- ggplot(cal, aes(fitted, y)) +
-    geom_point(size = 3, color = "#2c7bb6") +
-    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "#e74c3c") +
-    labs(title = "Calibration plot", x = "Mean predicted probability",
-         y = "Observed proportion") +
-    coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
-    theme_minimal(base_size = 12)
+  cal <- tryCatch({
+    tmp <- aggregate(cbind(fitted, y) ~ bin, data = df_diag, FUN = mean, na.rm = TRUE)
+    tmp[complete.cases(tmp), ]
+  }, error = function(e) data.frame(fitted = numeric(0), y = numeric(0)))
+
+  p1 <- if (nrow(cal) >= 2) {
+    ggplot(cal, aes(fitted, y)) +
+      geom_point(size = 3, color = "#2c7bb6") +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "#e74c3c") +
+      geom_smooth(method = "loess", se = FALSE, color = "#f39c12",
+                  linewidth = .7, na.rm = TRUE) +
+      labs(title = "Calibration plot", x = "Mean predicted probability",
+           y = "Observed proportion") +
+      coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
+      theme_minimal(base_size = 12)
+  } else {
+    ggplot() +
+      annotate("text", x = .5, y = .5, label = "Not enough variation\nfor calibration plot",
+               size = 4, color = "gray50") + theme_void() +
+      labs(title = "Calibration plot")
+  }
 
   p2 <- ggplot(df_diag, aes(sample = resid_dev)) +
     stat_qq(alpha = .5, color = "#2c7bb6") +
@@ -325,7 +345,7 @@ make_logit_diag_plots <- function(mod) {
   p3 <- ggplot(df_diag, aes(obs, cooks)) +
     geom_segment(aes(xend = obs, yend = 0), color = "#2c7bb6", alpha = .6) +
     geom_point(color = "#2c7bb6", size = 1.5) +
-    geom_hline(yintercept = 4 / nrow(df_diag),
+    geom_hline(yintercept = 4 / n,
                linetype = "dashed", color = "#e74c3c") +
     labs(title = "Cook's Distance", x = "Observation", y = "Cook's D",
          caption = "Dashed line: 4/n threshold") +
@@ -334,7 +354,7 @@ make_logit_diag_plots <- function(mod) {
   p4 <- ggplot(df_diag, aes(leverage, resid_prs)) +
     geom_point(alpha = .5, color = "#2c7bb6") +
     geom_hline(yintercept = 0, linetype = "dashed", color = "#e74c3c") +
-    geom_vline(xintercept = 2 * mean(df_diag$leverage),
+    geom_vline(xintercept = 2 * mean(df_diag$leverage, na.rm = TRUE),
                linetype = "dashed", color = "#f39c12") +
     labs(title = "Leverage vs Pearson Residuals",
          x = "Leverage", y = "Pearson residuals") +
@@ -757,7 +777,9 @@ server <- function(input, output, session) {
 
     out <- input$outcome
     exp <- input$exposure
-    cov <- if (!is.null(input$covariates)) input$covariates else character(0)
+    cov <- if (!is.null(input$covariates) &&
+               mt %in% c("lm_multi","logit_multi","ordinal","multinom"))
+             input$covariates else character(0)
 
     result <- tryCatch({
       if (mt %in% c("lm_simple","lm_multi")) {
@@ -941,53 +963,178 @@ server <- function(input, output, session) {
     tags$div(class = "card",
       tags$div(class = "card-header", label),
       tags$div(class = "card-body",
-        if (mt %in% c("logit_simple", "logit_multi")) {
-          tagList(
-            uiOutput("logit_diag_stats_ui"),
-            hr()
-          )
-        },
+        uiOutput("diag_stats_ui"),
+        hr(),
         plotOutput("diag_plots", height = "520px")
       )
     )
   })
 
-  output$logit_diag_stats_ui <- renderUI({
-    req(model_result(), input$model_type %in% c("logit_simple","logit_multi"))
-    mod  <- model_result()
-    null <- update(mod, . ~ 1)
-    dev  <- mod$deviance
-    df   <- mod$df.residual
-    mcf  <- 1 - (dev / null$deviance)
-    aic  <- AIC(mod)
+  output$diag_stats_ui <- renderUI({
+    req(model_result())
+    mt  <- input$model_type
+    mod <- model_result()
 
-    # Hosmer-Lemeshow (manual, no package dep)
-    hl <- tryCatch({
-      y_hat <- fitted(mod)
-      y_obs <- mod$y
-      n_g   <- 10
-      cuts  <- quantile(y_hat, probs = seq(0, 1, length.out = n_g + 1), na.rm = TRUE)
-      grp   <- cut(y_hat, breaks = unique(cuts), include.lowest = TRUE)
-      obs1  <- tapply(y_obs, grp, sum)
-      exp1  <- tapply(y_hat, grp, sum)
-      ng    <- tapply(y_obs, grp, length)
-      hl_x2 <- sum((obs1 - exp1)^2 / (exp1 * (1 - exp1 / ng)), na.rm = TRUE)
-      hl_df <- length(obs1) - 2
-      hl_p  <- pchisq(hl_x2, df = hl_df, lower.tail = FALSE)
-      paste0("χ² = ", round(hl_x2, 3), ", df = ", hl_df,
-             ", p ", fmt_p(hl_p),
-             if (hl_p > .05) " — good fit" else " — possible misfit")
-    }, error = function(e) "Could not compute")
+    if (mt %in% c("lm_simple", "lm_multi")) {
+      # ── Linear regression key diagnostics ──────────────────────────────────
+      s        <- summary(mod)
+      res      <- residuals(mod)
+      std_res  <- rstandard(mod)
+      lev      <- hatvalues(mod)
+      cooks    <- cooks.distance(mod)
+      n        <- length(res)
+      p_terms  <- length(coef(mod))
+      lev_thr  <- 2 * p_terms / n
+      cook_thr <- 4 / n
 
-    div(class = "alert alert-info",
-      tags$strong("Model fit statistics:"), br(),
-      HTML(paste0(
-        "Residual deviance: <b>", round(dev, 2), "</b> on <b>", df, "</b> df | ",
-        "AIC: <b>", round(aic, 2), "</b> | ",
-        "McFadden R²: <b>", round(mcf, 4), "</b>",
-        "<br>Hosmer-Lemeshow test: <b>", hl, "</b>"
-      ))
-    )
+      n_high_lev   <- sum(lev > lev_thr, na.rm = TRUE)
+      n_high_cook  <- sum(cooks > cook_thr, na.rm = TRUE)
+      n_outlier    <- sum(abs(std_res) > 2, na.rm = TRUE)
+
+      # Shapiro-Wilk on residuals (max 5000 obs)
+      sw <- tryCatch({
+        sw_samp <- if (n > 5000) sample(res, 5000) else res
+        st <- shapiro.test(sw_samp)
+        paste0("W = ", round(st$statistic, 4), ", p ", fmt_p(st$p.value),
+               if (st$p.value > .05) " — residuals appear normal"
+               else " — possible non-normality")
+      }, error = function(e) "Could not compute (n may be too large)")
+
+      # Breusch-Pagan-style: cor of |resid| with fitted
+      bp_note <- tryCatch({
+        ct <- cor.test(abs(res), fitted(mod))
+        paste0("r(|resid|, fitted) = ", round(ct$estimate, 3),
+               ", p ", fmt_p(ct$p.value),
+               if (ct$p.value > .05) " — no strong evidence of heteroscedasticity"
+               else " — possible heteroscedasticity")
+      }, error = function(e) "Could not compute")
+
+      div(class = "alert alert-info mb-0",
+        tags$strong("Key diagnostic values"), br(), br(),
+        tags$table(class = "table table-sm table-borderless mb-1",
+          style = "font-size:0.88rem;",
+          tags$tbody(
+            tags$tr(
+              tags$td(tags$b("R²")),
+              tags$td(round(s$r.squared, 4)),
+              tags$td(tags$b("Adj. R²")),
+              tags$td(round(s$adj.r.squared, 4)),
+              tags$td(tags$b("Residual SE")),
+              tags$td(round(s$sigma, 4))
+            ),
+            tags$tr(
+              tags$td(tags$b("Resid. range")),
+              tags$td(paste0(round(min(res),3), " to ", round(max(res),3))),
+              tags$td(tags$b("|Std.resid| > 2")),
+              tags$td(paste0(n_outlier, " obs (", round(100*n_outlier/n,1), "%)")),
+              tags$td(tags$b("F-statistic")),
+              tags$td(paste0(round(s$fstatistic[1],3), " (p ",
+                             fmt_p(pf(s$fstatistic[1], s$fstatistic[2],
+                                      s$fstatistic[3], lower.tail=FALSE)), ")"))
+            ),
+            tags$tr(
+              tags$td(tags$b("High leverage")),
+              tags$td(paste0(n_high_lev, " obs (threshold: ", round(lev_thr,3), ")")),
+              tags$td(tags$b("High Cook's D")),
+              tags$td(paste0(n_high_cook, " obs (threshold: ", round(cook_thr,3), ")")),
+              tags$td(tags$b("Max Cook's D")),
+              tags$td(round(max(cooks, na.rm=TRUE), 4))
+            ),
+            tags$tr(
+              tags$td(tags$b("Normality (S-W)")),
+              tags$td(colspan = "3", sw),
+              tags$td(tags$b("Homoscedasticity")),
+              tags$td(colspan = "1", bp_note)
+            )
+          )
+        )
+      )
+
+    } else if (mt %in% c("logit_simple", "logit_multi")) {
+      # ── Logistic regression key diagnostics ────────────────────────────────
+      null  <- tryCatch(update(mod, . ~ 1), error = function(e) NULL)
+      dev   <- mod$deviance
+      df_r  <- mod$df.residual
+      mcf   <- if (!is.null(null)) round(1 - dev / null$deviance, 4) else NA
+      aic   <- round(AIC(mod), 2)
+      bic   <- round(BIC(mod), 2)
+      n     <- nobs(mod)
+      cooks <- cooks.distance(mod)
+      lev   <- hatvalues(mod)
+      p_t   <- length(coef(mod))
+      lev_thr  <- 2 * p_t / n
+      cook_thr <- 4 / n
+      n_high_lev  <- sum(lev > lev_thr, na.rm = TRUE)
+      n_high_cook <- sum(cooks > cook_thr, na.rm = TRUE)
+
+      # Hosmer-Lemeshow
+      hl_txt <- tryCatch({
+        y_hat <- fitted(mod)
+        y_obs <- mod$y
+        cuts  <- unique(quantile(y_hat, probs=seq(0,1,length.out=11), na.rm=TRUE))
+        if (length(cuts) < 3) stop("degenerate")
+        grp   <- cut(y_hat, breaks=cuts, include.lowest=TRUE)
+        obs1  <- tapply(y_obs, grp, sum)
+        exp1  <- tapply(y_hat, grp, sum)
+        ng    <- tapply(y_obs, grp, length)
+        x2    <- sum((obs1-exp1)^2 / (exp1*(1-exp1/ng)), na.rm=TRUE)
+        df_hl <- length(obs1) - 2
+        p_hl  <- pchisq(x2, df=df_hl, lower.tail=FALSE)
+        list(stat=paste0("χ²(", df_hl, ") = ", round(x2,3)),
+             p   =fmt_p(p_hl),
+             note=if(p_hl>.05) "good fit" else "possible misfit")
+      }, error=function(e) list(stat="—", p="—", note="could not compute"))
+
+      # Discrimination: concordance (c-stat / AUC approximation)
+      c_stat <- tryCatch({
+        y_hat <- fitted(mod); y_obs <- mod$y
+        pairs <- outer(y_hat[y_obs==1], y_hat[y_obs==0], "-")
+        conc  <- sum(pairs > 0, na.rm=TRUE)
+        ties  <- sum(pairs == 0, na.rm=TRUE)
+        total <- sum(y_obs==1) * sum(y_obs==0)
+        round((conc + 0.5*ties) / total, 4)
+      }, error=function(e) NA)
+
+      div(class = "alert alert-info mb-0",
+        tags$strong("Key diagnostic values"), br(), br(),
+        tags$table(class = "table table-sm table-borderless mb-1",
+          style = "font-size:0.88rem;",
+          tags$tbody(
+            tags$tr(
+              tags$td(tags$b("AIC")),        tags$td(aic),
+              tags$td(tags$b("BIC")),        tags$td(bic),
+              tags$td(tags$b("McFadden R²")),tags$td(mcf)
+            ),
+            tags$tr(
+              tags$td(tags$b("Residual deviance")),
+              tags$td(paste0(round(dev,2), " on ", df_r, " df")),
+              tags$td(tags$b("C-statistic (AUC)")),
+              tags$td(if(!is.na(c_stat)) paste0(c_stat,
+                if(c_stat>=.8) " — good discrimination"
+                else if(c_stat>=.7) " — acceptable"
+                else " — poor discrimination") else "—"),
+              tags$td(tags$b("n")), tags$td(n)
+            ),
+            tags$tr(
+              tags$td(tags$b("Hosmer-Lemeshow")),
+              tags$td(hl_txt$stat),
+              tags$td(tags$b("p")),
+              tags$td(paste0(hl_txt$p, " — ", hl_txt$note)),
+              tags$td(tags$b("High Cook's D")),
+              tags$td(paste0(n_high_cook, " obs (threshold: ", round(cook_thr,3), ")"))
+            ),
+            tags$tr(
+              tags$td(tags$b("High leverage")),
+              tags$td(paste0(n_high_lev, " obs (threshold: ", round(lev_thr,3), ")")),
+              tags$td(tags$b("Max Cook's D")),
+              tags$td(round(max(cooks,na.rm=TRUE),4)),
+              tags$td(tags$b("Max leverage")),
+              tags$td(round(max(lev,na.rm=TRUE),4))
+            )
+          )
+        )
+      )
+    }
   })
 
   output$diag_plots <- renderPlot({
