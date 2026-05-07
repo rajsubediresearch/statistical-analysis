@@ -513,37 +513,44 @@ server <- function(input, output, session) {
           uiOutput("upload_options_ui")
         ),
         hr(),
-        h6("📊 Descriptive Statistics", class="fw-bold mb-1"),
-        uiOutput("desc_var_selector_ui"),
-        br(),
-        actionButton("run_desc", "Compute Summary Stats",
-                     class="btn-outline-primary w-100 btn-sm"),
-        hr(),
         uiOutput("data_summary_ui")
       ),
 
       "analysis" = tagList(
         h5("Model Setup", class="fw-bold mb-3"),
-        selectInput("model_type", "Statistical Method:",
-                    choices=c(
-                      "Simple Linear Regression"        = "lm_simple",
-                      "Multiple Linear Regression"      = "lm_multi",
-                      "Simple Logistic Regression"      = "logit_simple",
-                      "Multiple Logistic Regression"    = "logit_multi",
-                      "Ordinal Logistic Regression"     = "ordinal",
-                      "Multinomial Logistic Regression" = "multinom",
-                      "Independent t-test"              = "ttest",
-                      "One-way ANOVA"                   = "anova"
-                    )),
+        tags$div(
+          tags$label("Statistical Method:", class="control-label"),
+          tags$select(
+            id = "model_type",
+            class = "form-control",
+            tags$optgroup(label = "Descriptive",
+              tags$option(value = "desc", "Descriptive Statistics")
+            ),
+            tags$optgroup(label = "Regression",
+              tags$option(value = "lm_simple",   "Simple Linear Regression"),
+              tags$option(value = "lm_multi",    "Multiple Linear Regression"),
+              tags$option(value = "logit_simple","Simple Logistic Regression"),
+              tags$option(value = "logit_multi", "Multiple Logistic Regression"),
+              tags$option(value = "ordinal",     "Ordinal Logistic Regression"),
+              tags$option(value = "multinom",    "Multinomial Logistic Regression")
+            ),
+            tags$optgroup(label = "Group Comparison",
+              tags$option(value = "ttest", "Independent t-test"),
+              tags$option(value = "anova", "One-way ANOVA")
+            )
+          )
+        ),
         hr(),
         uiOutput("var_selectors"),
         hr(),
-        checkboxInput("show_plot",
-                      "📈 Show analysis plot below results",
-                      value=FALSE),
+        conditionalPanel(
+          "input.model_type !== 'desc'",
+          checkboxInput("show_plot",
+                        "📈 Show analysis plot below results",
+                        value=FALSE)
+        ),
         br(),
-        actionButton("run_model", "▶ Run Analysis",
-                     class="btn-primary w-100")
+        uiOutput("run_btn_ui")
       ),
 
       "plots" = tagList(
@@ -564,8 +571,7 @@ server <- function(input, output, session) {
         tags$div(class="card",
           tags$div(class="card-header", "Data Preview"),
           tags$div(class="card-body", DTOutput("data_preview"))
-        ),
-        uiOutput("desc_stats_card")
+        )
       ),
 
       "analysis" = tagList(
@@ -588,52 +594,24 @@ server <- function(input, output, session) {
     )
   })
 
-  # ── Descriptive stats variable selector ──────────────────────────────────
-  output$desc_var_selector_ui <- renderUI({
-    ac <- all_cols()
-    selectInput("desc_vars", "Variables (leave blank = all):",
-                choices = ac, multiple = TRUE, selectize = TRUE)
-  })
-
-  desc_stats_result <- eventReactive(input$run_desc, {
-    make_desc_stats(active_data(), input$desc_vars)
-  }, ignoreNULL = FALSE)
-
-  output$desc_stats_card <- renderUI({
-    req(input$run_desc > 0)
-    res <- desc_stats_result()
-    if (is.null(res)) return(NULL)
-    cards <- list()
-    if (!is.null(res$numeric)) {
-      cards <- c(cards, list(
-        tags$div(class = "card",
-          tags$div(class = "card-header", "📊 Descriptive Statistics — Continuous Variables"),
-          tags$div(class = "card-body", DTOutput("desc_num_table"))
-        )
-      ))
-    }
-    if (!is.null(res$categorical)) {
-      cards <- c(cards, list(
-        tags$div(class = "card",
-          tags$div(class = "card-header", "📋 Descriptive Statistics — Categorical Variables"),
-          tags$div(class = "card-body", DTOutput("desc_cat_table"))
-        )
-      ))
-    }
-    tagList(cards)
+  # ── Run button ────────────────────────────────────────────────────────────
+  output$run_btn_ui <- renderUI({
+    lbl <- if (!is.null(input$model_type) && input$model_type == "desc")
+      "▶ Compute Statistics" else "▶ Run Analysis"
+    actionButton("run_model", lbl, class = "btn-primary w-100")
   })
 
   output$desc_num_table <- renderDT({
-    req(input$run_desc > 0)
-    res <- desc_stats_result()
+    req(model_result(), input$model_type == "desc")
+    res <- model_result()$result
     req(res$numeric)
     datatable(res$numeric, rownames = FALSE,
               options = list(pageLength = 20, dom = "t", scrollX = TRUE))
   })
 
   output$desc_cat_table <- renderDT({
-    req(input$run_desc > 0)
-    res <- desc_stats_result()
+    req(model_result(), input$model_type == "desc")
+    res <- model_result()$result
     req(res$categorical)
     datatable(res$categorical, rownames = FALSE,
               options = list(pageLength = 30, dom = "tp", scrollX = TRUE))
@@ -670,6 +648,13 @@ server <- function(input, output, session) {
     def_ord <- if (length(ord_cols()) > 0) ord_cols()[1] else ac[1]
 
     switch(mt,
+      desc         = tagList(
+        tags$small(class = "text-muted",
+          "Select variables to summarise, or leave blank for all columns."),
+        br(), br(),
+        selectInput("desc_vars", "Variables (optional):",
+                    choices = ac, multiple = TRUE, selectize = TRUE)
+      ),
       lm_simple    = tagList(
         selectInput("outcome",  "Outcome (continuous):", nc, selected=def_out),
         selectInput("exposure", "Exposure:", ac, selected=def_exp)),
@@ -706,6 +691,13 @@ server <- function(input, output, session) {
   model_result <- eventReactive(input$run_model, {
     df  <- active_data()
     mt  <- input$model_type
+
+    # Descriptive stats path — no outcome/exposure needed
+    if (mt == "desc") {
+      return(list(.__type__ = "desc",
+                  result    = make_desc_stats(df, input$desc_vars)))
+    }
+
     out <- input$outcome
     exp <- input$exposure
     cov <- input$covariates
@@ -743,6 +735,26 @@ server <- function(input, output, session) {
     req(model_result())
     mt  <- input$model_type
     mod <- model_result()
+
+    # ── Descriptive statistics output ───────────────────────────────────────
+    if (mt == "desc") {
+      res <- mod$result
+      cards <- list()
+      if (!is.null(res$numeric)) {
+        cards <- c(cards, list(tagList(
+          h6("Continuous Variables", class = "fw-bold"),
+          DTOutput("desc_num_table"), br()
+        )))
+      }
+      if (!is.null(res$categorical)) {
+        cards <- c(cards, list(tagList(
+          h6("Categorical Variables", class = "fw-bold"),
+          DTOutput("desc_cat_table")
+        )))
+      }
+      return(tagList(cards))
+    }
+
     out <- input$outcome
     exp <- input$exposure
     cov <- if (!is.null(input$covariates)) input$covariates else character(0)
@@ -834,7 +846,9 @@ server <- function(input, output, session) {
 
   output$coef_table <- renderDT({
     req(model_result())
-    mt <- input$model_type; mod <- model_result()
+    mt <- input$model_type
+    if (mt == "desc") return(datatable(data.frame()))
+    mod <- model_result()
     tbl <- tryCatch({
       if (mt %in% c("lm_simple","lm_multi")) {
         cf <- coef(summary(mod)); ci <- confint(mod)
@@ -889,7 +903,8 @@ server <- function(input, output, session) {
 
   # ── Post-hoc Tukey (ANOVA only) ───────────────────────────────────────────
   output$posthoc_card <- renderUI({
-    req(model_result(), input$model_type == "anova")
+    req(model_result())
+    if (input$model_type != "anova") return(NULL)
     tags$div(class = "card",
       tags$div(class = "card-header", "🔍 Post-hoc Tests (Tukey HSD)"),
       tags$div(class = "card-body",
@@ -918,7 +933,6 @@ server <- function(input, output, session) {
     req(model_result())
     mt <- input$model_type
     if (!mt %in% c("lm_simple", "lm_multi", "logit_simple", "logit_multi")) return(NULL)
-
     label <- if (mt %in% c("lm_simple", "lm_multi"))
       "🔬 Linear Regression Diagnostics"
     else
