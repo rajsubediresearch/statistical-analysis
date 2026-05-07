@@ -1,92 +1,108 @@
-# BioStat Explorer — Shinylive Deployment Guide
+# BioStat Explorer
 
-## What this is
-A browser-based biostatistics tool built with R Shiny + Shinylive.
-Runs entirely client-side — no server, no cost, deploys free on GitHub Pages.
+**An interactive, browser-based biostatistics tool for education and research.**  
+Built with R Shiny · Deployable via Shinylive on GitHub Pages · No server required · Free
 
-## Models included
-- Simple & Multiple Linear Regression
-- Simple & Multiple Logistic Regression
-- Ordinal Logistic Regression (MASS::polr)
-- Multinomial Logistic Regression (nnet::multinom)
-- Independent t-test
-- One-way ANOVA
+> Developed by [Raj Subedi](https://rajsubediresearch.com) · PhD Student, Epidemiology · Georgia State University
+
+---
+
+## Overview
+
+BioStat Explorer lets users upload their own dataset (CSV, TXT, or Excel), select variables, choose a statistical model, and instantly receive results — including a coefficient table, confidence intervals, and **auto-generated plain-English interpretations** of the findings.
+
+Designed for epidemiology students, public health researchers, and anyone learning applied biostatistics without needing to write code.
+
+---
+
+## Statistical Methods
+
+| Method | Function |
+|--------|----------|
+| Simple Linear Regression | `lm()` |
+| Multiple Linear Regression | `lm()` |
+| Simple Logistic Regression | `glm(..., binomial)` |
+| Multiple Logistic Regression | `glm(..., binomial)` |
+| Ordinal Logistic Regression | `MASS::polr()` |
+| Multinomial Logistic Regression | `nnet::multinom()` |
+| Independent t-test | `t.test()` |
+| One-way ANOVA | `aov()` |
+
+---
 
 ## Features
-- Two built-in sample datasets (Epidemiology & Clinical Trial)
-- Upload your own CSV/TXT
-- Auto-generated plain-English interpretations
-- Coefficient tables with CIs
-- Visualization tab (histogram, scatter, boxplot, density, bar)
-- Causal inference disclaimer
+
+-  **Flexible data input** — upload CSV, TXT, or Excel files; or use built-in sample datasets
+-  **Auto-interpretation** — results are narrated in plain English with variable names embedded (e.g., *"Smoking is associated with 68% higher odds of disease, adjusting for age and BMI"*)
+-  **Coefficient tables** — estimates, standard errors, p-values, and 95% CIs
+-  **Analysis plots** — contextually appropriate visualizations per model type (scatter + regression line, violin plots, stacked bar charts, etc.)
+-  **Explore tab** — standalone histogram, density, scatter, boxplot, and bar chart builder
+-  **Causal inference disclaimer** — reminds users that statistical associations require careful interpretation
+-  **No installation needed** — deployable as a static site via Shinylive + GitHub Pages
 
 ---
 
-## Deployment Steps
+## Built-in Sample Datasets
 
-### Step 1 — Install R packages locally
+Two simulated datasets are included for immediate exploration:
 
-```r
-install.packages(c("shiny", "bslib", "DT", "ggplot2", "MASS", "nnet", "shinylive"))
-```
-
-### Step 2 — Export the app to Shinylive format
-
-```r
-library(shinylive)
-
-# Run from the parent directory of biostats-tool/
-shinylive::export(
-  appdir = "biostats-tool",
-  destdir = "biostats-tool-site"
-)
-```
-
-This creates a `biostats-tool-site/` folder with static HTML/JS/WASM files.
-
-### Step 3 — Deploy to GitHub Pages
-
-**Option A — Separate repo (recommended)**
-1. Create a new repo: `biostat-explorer` on GitHub
-2. Push the contents of `biostats-tool-site/` to the `main` branch
-3. Go to repo Settings → Pages → Deploy from branch → main / root
-4. Your tool will be live at:
-   `https://rajsubediresearch.github.io/biostat-explorer/`
-   And once your custom domain is set: `https://rajsubediresearch.com/biostat-explorer/`
-
-**Option B — Subfolder of existing site**
-1. Copy `biostats-tool-site/` contents into a `biostat-explorer/` folder
-   in your main `rajsubediresearch.github.io` repo
-2. Push to main
-3. Live at: `https://rajsubediresearch.com/biostat-explorer/`
-
-### Step 4 — Add to your main site
-In your `rajsubediresearch.github.io` index, add a card linking to:
-`/biostat-explorer/`
+- **Epidemiology Dataset (n=300)** — age, sex, BMI, smoking, vaccination, systolic BP, disease outcome, severity, transport mode
+- **Clinical Trial Dataset (n=250)** — treatment group, age, weight, cholesterol, BP change, recovery, outcome category
 
 ---
 
-## Local testing (before deploying)
+## Run Locally
 
 ```r
-# Test the Shiny app locally first
-shiny::runApp("biostats-tool")
+# Install dependencies (run once)
+install.packages(c("shiny", "bslib", "DT", "ggplot2", "MASS", "nnet", "readxl"))
 
-# Then test the Shinylive export locally
-shinylive::export("biostats-tool", "biostats-tool-site")
-httpuv::runStaticServer("biostats-tool-site")
+# Launch the app
+shiny::runApp("app.R")
 ```
 
 ---
 
-## Notes on package support in WebR/Shinylive
-- `shiny`, `bslib`, `DT`, `ggplot2`, `MASS`, `nnet` — all supported ✅
-- `readxl` — NOT available in WebR; Excel uploads require local Shiny
-  (CSV fallback is included in the app)
-- First load takes ~10-20 seconds as WebR downloads R packages to browser
+## Deploy to GitHub Pages (Shinylive)
+
+```r
+install.packages("shinylive")
+
+# Export to static site (run from parent directory)
+shinylive::export(appdir = ".", destdir = "docs")
+```
+
+Then in your GitHub repo: **Settings → Pages → Deploy from branch → main / docs**
+
+The app will be live at `https://yourusername.github.io/statistical-analysis/`
 
 ---
 
-## Adding a DOI (Zenodo)
-Once deployed, archive a release on Zenodo for a citable DOI badge,
-just like your DAG Builder and Age Standardization tools.
+## Dependencies
+
+```r
+library(shiny)
+library(bslib)
+library(DT)
+library(ggplot2)
+library(MASS)
+library(nnet)
+library(readxl)
+```
+
+---
+
+## Citation
+
+If you use this tool in teaching or research, please cite:
+
+> Subedi, R. (2026). *BioStat Explorer: An interactive biostatistics teaching tool*. GitHub. https://github.com/rajsubediresearch/statistical-analysis
+
+---
+
+## Author
+
+**Raj Subedi**  
+PhD Student · Epidemiology · Georgia State University  
+2CI Fellow · Graduate Research Assistant, Chowell Lab  
+🌐 [rajsubediresearch.com](https://rajsubediresearch.com) · [Google Scholar](https://scholar.google.com) · [GitHub](https://github.com/rajsubediresearch)
