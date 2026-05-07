@@ -60,29 +60,38 @@ fmt_p <- function(p) {
 }
 
 interp_lm <- function(exposure, outcome, covariates, coef, ci_lo, ci_hi, p) {
-  adj      <- if (length(covariates) > 0)
+  adj <- if (length(covariates) > 0)
     paste0(", adjusting for ", paste(covariates, collapse=", ")) else ""
-  dir      <- if (coef >= 0) "increase" else "decrease"
-  sig_note <- if (p >= .05)
-    paste0(" However, this association did not reach statistical significance (p ",
-           fmt_p(p), ").") else ""
-  paste0("<b>", exposure, "</b> is associated with a <b>", round(abs(coef),3),
-         " unit ", dir, "</b> in <b>", outcome, "</b> (\u03b2 = ", round(coef,3),
-         ", 95% CI: ", round(ci_lo,3), " to ", round(ci_hi,3),
-         ", p ", fmt_p(p), ")", adj, ".", sig_note)
+  dir <- if (coef >= 0) "increase" else "decrease"
+  if (p < .05) {
+    paste0("<b>", exposure, "</b> is associated with a <b>", round(abs(coef),3),
+           " unit ", dir, "</b> in <b>", outcome, "</b> (\u03b2 = ", round(coef,3),
+           ", 95% CI: ", round(ci_lo,3), " to ", round(ci_hi,3),
+           ", p ", fmt_p(p), ")", adj, ".")
+  } else {
+    paste0("<b>", exposure, "</b> was <b>not significantly associated</b> with <b>",
+           outcome, "</b> (\u03b2 = ", round(coef,3),
+           ", 95% CI: ", round(ci_lo,3), " to ", round(ci_hi,3),
+           ", p ", fmt_p(p), ")", adj, ".")
+  }
 }
 
 interp_logistic <- function(exposure, outcome, covariates, or, ci_lo, ci_hi, p) {
-  adj      <- if (length(covariates) > 0)
+  adj <- if (length(covariates) > 0)
     paste0(", adjusting for ", paste(covariates, collapse=", ")) else ""
-  dir      <- if (or >= 1) "higher" else "lower"
-  pct      <- round(abs(1 - or) * 100)
-  sig_note <- if (p >= .05)
-    " This association did not reach statistical significance." else ""
-  paste0("<b>", exposure, "</b> is associated with <b>", pct, "% ", dir,
-         " odds</b> of <b>", outcome, "</b> (OR = ", round(or,3),
-         ", 95% CI: ", round(ci_lo,3), " to ", round(ci_hi,3),
-         ", p ", fmt_p(p), ")", adj, ".", sig_note)
+  dir <- if (or >= 1) "higher" else "lower"
+  pct <- round(abs(1 - or) * 100)
+  if (p < .05) {
+    paste0("<b>", exposure, "</b> is associated with <b>", pct, "% ", dir,
+           " odds</b> of <b>", outcome, "</b> (OR = ", round(or,3),
+           ", 95% CI: ", round(ci_lo,3), " to ", round(ci_hi,3),
+           ", p ", fmt_p(p), ")", adj, ".")
+  } else {
+    paste0("<b>", exposure, "</b> was <b>not significantly associated</b> with the odds of <b>",
+           outcome, "</b> (OR = ", round(or,3),
+           ", 95% CI: ", round(ci_lo,3), " to ", round(ci_hi,3),
+           ", p ", fmt_p(p), ")", adj, ".")
+  }
 }
 
 interp_ttest <- function(g1, g2, outcome, diff, ci_lo, ci_hi, p) {
