@@ -5,8 +5,57 @@ library(ggplot2)
 library(MASS)
 library(nnet)
 library(readxl)
+library(gridExtra)
 
 `%||%` <- function(a, b) if (!is.null(a) && length(a) > 0 && !identical(a, "")) a else b
+
+# ── Descriptive statistics helper ─────────────────────────────────────────────
+make_desc_stats <- function(df, vars = NULL) {
+  if (!is.null(vars) && length(vars) > 0) df <- df[, vars, drop = FALSE]
+
+  num_df <- df[, sapply(df, is.numeric), drop = FALSE]
+  cat_df <- df[, !sapply(df, is.numeric), drop = FALSE]
+
+  out <- list()
+
+  if (ncol(num_df) > 0) {
+    num_tbl <- do.call(rbind, lapply(names(num_df), function(v) {
+      x <- na.omit(num_df[[v]])
+      data.frame(
+        Variable = v,
+        N        = length(x),
+        Missing  = sum(is.na(num_df[[v]])),
+        Mean     = round(mean(x), 3),
+        SD       = round(sd(x), 3),
+        Median   = round(median(x), 3),
+        IQR      = round(IQR(x), 3),
+        Min      = round(min(x), 3),
+        Max      = round(max(x), 3),
+        check.names = FALSE
+      )
+    }))
+    out$numeric <- num_tbl
+  }
+
+  if (ncol(cat_df) > 0) {
+    cat_tbl <- do.call(rbind, lapply(names(cat_df), function(v) {
+      x  <- cat_df[[v]]
+      tb <- sort(table(x, useNA = "ifany"), decreasing = TRUE)
+      do.call(rbind, lapply(names(tb), function(lv) {
+        data.frame(
+          Variable   = v,
+          Level      = ifelse(is.na(lv) | lv == "NA", "<NA>", lv),
+          N          = as.integer(tb[[lv]]),
+          `% (valid)` = round(100 * as.integer(tb[[lv]]) / sum(!is.na(x)), 1),
+          check.names = FALSE
+        )
+      }))
+    }))
+    out$categorical <- cat_tbl
+  }
+
+  out
+}
 
 # ── Sample datasets ───────────────────────────────────────────────────────────
 make_epi_data <- function() {
@@ -184,6 +233,116 @@ make_analysis_plot <- function(df, mt, outcome, exposure) {
   })
 }
 
+# ── Post-hoc Tukey helper ─────────────────────────────────────────────────────
+make_tukey_table <- function(aov_mod) {
+  tk  <- TukeyHSD(aov_mod)
+  mat <- tk[[1]]
+  data.frame(
+    Comparison   = rownames(mat),
+    Difference   = round(mat[, "diff"],  4),
+    `CI Low`     = round(mat[, "lwr"],   4),
+    `CI High`    = round(mat[, "upr"],   4),
+    `p adjusted` = sapply(mat[, "p adj"], function(p)
+      if (p < .001) "<0.001" else as.character(round(p, 4))),
+    check.names  = FALSE
+  )
+}
+
+# ── Regression diagnostics helpers ───────────────────────────────────────────
+make_lm_diag_plots <- function(mod) {
+  df_diag <- data.frame(
+    fitted    = fitted(mod),
+    resid     = residuals(mod),
+    std_resid = rstandard(mod),
+    leverage  = hatvalues(mod),
+    cooks     = cooks.distance(mod),
+    obs       = seq_along(fitted(mod))
+  )
+  p1 <- ggplot(df_diag, aes(fitted, resid)) +
+    geom_point(alpha = .5, color = "#2c7bb6") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "#e74c3c") +
+    geom_smooth(method = "loess", se = FALSE, color = "#f39c12", linewidth = .8) +
+    labs(title = "Residuals vs Fitted", x = "Fitted values", y = "Residuals") +
+    theme_minimal(base_size = 12)
+
+  p2 <- ggplot(df_diag, aes(sample = std_resid)) +
+    stat_qq(alpha = .5, color = "#2c7bb6") +
+    stat_qq_line(color = "#e74c3c") +
+    labs(title = "Normal Q-Q", x = "Theoretical quantiles", y = "Std. residuals") +
+    theme_minimal(base_size = 12)
+
+  p3 <- ggplot(df_diag, aes(fitted, sqrt(abs(std_resid)))) +
+    geom_point(alpha = .5, color = "#2c7bb6") +
+    geom_smooth(method = "loess", se = FALSE, color = "#f39c12", linewidth = .8) +
+    labs(title = "Scale-Location", x = "Fitted values",
+         y = expression(sqrt("|Std. residuals|"))) +
+    theme_minimal(base_size = 12)
+
+  p4 <- ggplot(df_diag, aes(leverage, std_resid, size = cooks)) +
+    geom_point(alpha = .6, color = "#2c7bb6") +
+    geom_hline(yintercept = c(-2, 2), linetype = "dashed", color = "#e74c3c") +
+    geom_vline(xintercept = 2 * mean(df_diag$leverage),
+               linetype = "dashed", color = "#f39c12") +
+    labs(title = "Leverage vs Std. Residuals", x = "Leverage",
+         y = "Std. residuals", size = "Cook's D") +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "bottom")
+
+  list(p1 = p1, p2 = p2, p3 = p3, p4 = p4)
+}
+
+make_logit_diag_plots <- function(mod) {
+  df_diag <- data.frame(
+    fitted    = fitted(mod),
+    resid_dev = residuals(mod, type = "deviance"),
+    resid_prs = residuals(mod, type = "pearson"),
+    leverage  = hatvalues(mod),
+    cooks     = cooks.distance(mod),
+    obs       = seq_along(fitted(mod))
+  )
+
+  # Calibration: predicted vs observed proportions (binned)
+  n_bins <- min(10, floor(nrow(df_diag) / 15))
+  df_diag$bin <- cut(df_diag$fitted, breaks = n_bins, include.lowest = TRUE)
+  cal <- aggregate(cbind(fitted, y = mod$y) ~ bin, data = df_diag,
+                   FUN = mean, na.rm = TRUE)
+
+  p1 <- ggplot(cal, aes(fitted, y)) +
+    geom_point(size = 3, color = "#2c7bb6") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "#e74c3c") +
+    labs(title = "Calibration plot", x = "Mean predicted probability",
+         y = "Observed proportion") +
+    coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
+    theme_minimal(base_size = 12)
+
+  p2 <- ggplot(df_diag, aes(sample = resid_dev)) +
+    stat_qq(alpha = .5, color = "#2c7bb6") +
+    stat_qq_line(color = "#e74c3c") +
+    labs(title = "Normal Q-Q (deviance resid.)",
+         x = "Theoretical quantiles", y = "Deviance residuals") +
+    theme_minimal(base_size = 12)
+
+  p3 <- ggplot(df_diag, aes(obs, cooks)) +
+    geom_segment(aes(xend = obs, yend = 0), color = "#2c7bb6", alpha = .6) +
+    geom_point(color = "#2c7bb6", size = 1.5) +
+    geom_hline(yintercept = 4 / nrow(df_diag),
+               linetype = "dashed", color = "#e74c3c") +
+    labs(title = "Cook's Distance", x = "Observation", y = "Cook's D",
+         caption = "Dashed line: 4/n threshold") +
+    theme_minimal(base_size = 12)
+
+  p4 <- ggplot(df_diag, aes(leverage, resid_prs)) +
+    geom_point(alpha = .5, color = "#2c7bb6") +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "#e74c3c") +
+    geom_vline(xintercept = 2 * mean(df_diag$leverage),
+               linetype = "dashed", color = "#f39c12") +
+    labs(title = "Leverage vs Pearson Residuals",
+         x = "Leverage", y = "Pearson residuals") +
+    theme_minimal(base_size = 12)
+
+  list(p1 = p1, p2 = p2, p3 = p3, p4 = p4)
+}
+
 # ── UI ────────────────────────────────────────────────────────────────────────
 ui <- fluidPage(
   theme = bs_theme(bootswatch="flatly", primary="#2c7bb6"),
@@ -354,6 +513,12 @@ server <- function(input, output, session) {
           uiOutput("upload_options_ui")
         ),
         hr(),
+        h6("📊 Descriptive Statistics", class="fw-bold mb-1"),
+        uiOutput("desc_var_selector_ui"),
+        br(),
+        actionButton("run_desc", "Compute Summary Stats",
+                     class="btn-outline-primary w-100 btn-sm"),
+        hr(),
         uiOutput("data_summary_ui")
       ),
 
@@ -399,7 +564,8 @@ server <- function(input, output, session) {
         tags$div(class="card",
           tags$div(class="card-header", "Data Preview"),
           tags$div(class="card-body", DTOutput("data_preview"))
-        )
+        ),
+        uiOutput("desc_stats_card")
       ),
 
       "analysis" = tagList(
@@ -407,6 +573,8 @@ server <- function(input, output, session) {
           tags$div(class="card-header", "Results"),
           tags$div(class="card-body", uiOutput("results_ui"))
         ),
+        uiOutput("posthoc_card"),
+        uiOutput("diagnostics_card"),
         uiOutput("analysis_plot_card")
       ),
 
@@ -418,6 +586,57 @@ server <- function(input, output, session) {
         )
       )
     )
+  })
+
+  # ── Descriptive stats variable selector ──────────────────────────────────
+  output$desc_var_selector_ui <- renderUI({
+    ac <- all_cols()
+    selectInput("desc_vars", "Variables (leave blank = all):",
+                choices = ac, multiple = TRUE, selectize = TRUE)
+  })
+
+  desc_stats_result <- eventReactive(input$run_desc, {
+    make_desc_stats(active_data(), input$desc_vars)
+  }, ignoreNULL = FALSE)
+
+  output$desc_stats_card <- renderUI({
+    req(input$run_desc > 0)
+    res <- desc_stats_result()
+    if (is.null(res)) return(NULL)
+    cards <- list()
+    if (!is.null(res$numeric)) {
+      cards <- c(cards, list(
+        tags$div(class = "card",
+          tags$div(class = "card-header", "📊 Descriptive Statistics — Continuous Variables"),
+          tags$div(class = "card-body", DTOutput("desc_num_table"))
+        )
+      ))
+    }
+    if (!is.null(res$categorical)) {
+      cards <- c(cards, list(
+        tags$div(class = "card",
+          tags$div(class = "card-header", "📋 Descriptive Statistics — Categorical Variables"),
+          tags$div(class = "card-body", DTOutput("desc_cat_table"))
+        )
+      ))
+    }
+    tagList(cards)
+  })
+
+  output$desc_num_table <- renderDT({
+    req(input$run_desc > 0)
+    res <- desc_stats_result()
+    req(res$numeric)
+    datatable(res$numeric, rownames = FALSE,
+              options = list(pageLength = 20, dom = "t", scrollX = TRUE))
+  })
+
+  output$desc_cat_table <- renderDT({
+    req(input$run_desc > 0)
+    res <- desc_stats_result()
+    req(res$categorical)
+    datatable(res$categorical, rownames = FALSE,
+              options = list(pageLength = 30, dom = "tp", scrollX = TRUE))
   })
 
   # ── Data tab outputs ──────────────────────────────────────────────────────
@@ -666,6 +885,107 @@ server <- function(input, output, session) {
     req(input$run_model, isTRUE(input$show_plot), model_result())
     make_analysis_plot(active_data(), input$model_type,
                        input$outcome, input$exposure)
+  })
+
+  # ── Post-hoc Tukey (ANOVA only) ───────────────────────────────────────────
+  output$posthoc_card <- renderUI({
+    req(model_result(), input$model_type == "anova")
+    tags$div(class = "card",
+      tags$div(class = "card-header", "🔍 Post-hoc Tests (Tukey HSD)"),
+      tags$div(class = "card-body",
+        p(class = "text-muted",
+          tags$small("Pairwise comparisons with Bonferroni-corrected p-values via Tukey's Honestly Significant Difference.")),
+        DTOutput("posthoc_table")
+      )
+    )
+  })
+
+  output$posthoc_table <- renderDT({
+    req(model_result(), input$model_type == "anova")
+    tbl <- tryCatch(
+      make_tukey_table(model_result()),
+      error = function(e) data.frame(Error = e$message)
+    )
+    datatable(tbl, rownames = FALSE,
+              options = list(pageLength = 20, dom = "tp", scrollX = TRUE)) |>
+      formatStyle("p adjusted",
+        backgroundColor = styleEqual("<0.001", "#d4edda"),
+        color            = styleEqual("<0.001", "#155724"))
+  })
+
+  # ── Regression diagnostics ────────────────────────────────────────────────
+  output$diagnostics_card <- renderUI({
+    req(model_result())
+    mt <- input$model_type
+    if (!mt %in% c("lm_simple", "lm_multi", "logit_simple", "logit_multi")) return(NULL)
+
+    label <- if (mt %in% c("lm_simple", "lm_multi"))
+      "🔬 Linear Regression Diagnostics"
+    else
+      "🔬 Logistic Regression Diagnostics"
+
+    tags$div(class = "card",
+      tags$div(class = "card-header", label),
+      tags$div(class = "card-body",
+        if (mt %in% c("logit_simple", "logit_multi")) {
+          tagList(
+            uiOutput("logit_diag_stats_ui"),
+            hr()
+          )
+        },
+        plotOutput("diag_plots", height = "520px")
+      )
+    )
+  })
+
+  output$logit_diag_stats_ui <- renderUI({
+    req(model_result(), input$model_type %in% c("logit_simple","logit_multi"))
+    mod  <- model_result()
+    null <- update(mod, . ~ 1)
+    dev  <- mod$deviance
+    df   <- mod$df.residual
+    mcf  <- 1 - (dev / null$deviance)
+    aic  <- AIC(mod)
+
+    # Hosmer-Lemeshow (manual, no package dep)
+    hl <- tryCatch({
+      y_hat <- fitted(mod)
+      y_obs <- mod$y
+      n_g   <- 10
+      cuts  <- quantile(y_hat, probs = seq(0, 1, length.out = n_g + 1), na.rm = TRUE)
+      grp   <- cut(y_hat, breaks = unique(cuts), include.lowest = TRUE)
+      obs1  <- tapply(y_obs, grp, sum)
+      exp1  <- tapply(y_hat, grp, sum)
+      ng    <- tapply(y_obs, grp, length)
+      hl_x2 <- sum((obs1 - exp1)^2 / (exp1 * (1 - exp1 / ng)), na.rm = TRUE)
+      hl_df <- length(obs1) - 2
+      hl_p  <- pchisq(hl_x2, df = hl_df, lower.tail = FALSE)
+      paste0("χ² = ", round(hl_x2, 3), ", df = ", hl_df,
+             ", p ", fmt_p(hl_p),
+             if (hl_p > .05) " — good fit" else " — possible misfit")
+    }, error = function(e) "Could not compute")
+
+    div(class = "alert alert-info",
+      tags$strong("Model fit statistics:"), br(),
+      HTML(paste0(
+        "Residual deviance: <b>", round(dev, 2), "</b> on <b>", df, "</b> df | ",
+        "AIC: <b>", round(aic, 2), "</b> | ",
+        "McFadden R²: <b>", round(mcf, 4), "</b>",
+        "<br>Hosmer-Lemeshow test: <b>", hl, "</b>"
+      ))
+    )
+  })
+
+  output$diag_plots <- renderPlot({
+    req(model_result())
+    mt  <- input$model_type
+    mod <- model_result()
+    if (mt %in% c("lm_simple", "lm_multi")) {
+      ps <- make_lm_diag_plots(mod)
+    } else if (mt %in% c("logit_simple", "logit_multi")) {
+      ps <- make_logit_diag_plots(mod)
+    } else return(NULL)
+    grid.arrange(ps$p1, ps$p2, ps$p3, ps$p4, ncol = 2)
   })
 
   # ── Explore plots ─────────────────────────────────────────────────────────
