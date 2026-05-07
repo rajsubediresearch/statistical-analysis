@@ -4,7 +4,7 @@
 Built with R Shiny · Deployable via Shinylive on GitHub Pages · No server required · Free
 
 > Developed by [Raj Subedi](https://rajsubediresearch.com) · PhD Student, Epidemiology · Georgia State University
-
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20074293.svg)](https://doi.org/10.5281/zenodo.20074293)
 ---
 
 ## Overview
@@ -94,10 +94,8 @@ library(readxl)
 
 ## Citation
 
-If you use this tool in teaching or research, please cite:
-
-> Subedi, R. (2026). *BioStat Explorer: An interactive biostatistics teaching tool*. GitHub. https://github.com/rajsubediresearch/statistical-analysis
-
+Subedi, R. (2026). *BioStat Explorer: An interactive biostatistics teaching tool*. 
+Zenodo. https://doi.org/10.5281/zenodo.20074293
 ---
 
 ## Author
@@ -105,4 +103,4 @@ If you use this tool in teaching or research, please cite:
 **Raj Subedi**  
 PhD Student · Epidemiology · Georgia State University  
 2CI Fellow · Graduate Research Assistant, Chowell Lab  
-🌐 [rajsubediresearch.com](https://rajsubediresearch.com) · [Google Scholar](https://scholar.google.com) · [GitHub](https://github.com/rajsubediresearch)
+🌐 [rajsubediresearch.com](https://rajsubediresearch.com) · [Google Scholar](https://scholar.google.com/citations?user=Lf5R5zwAAAAJ&hl=en&oi=ao) · [GitHub](https://github.com/rajsubediresearch)
