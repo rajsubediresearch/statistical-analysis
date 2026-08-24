@@ -3,7 +3,7 @@
 **An interactive, browser-based biostatistics tool for education and research.**  
 Built with R Shiny · Deployable via Shinylive on GitHub Pages · No server required · Free
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20074293.svg)](https://doi.org/10.5281/zenodo.20074293)
-> Developed by [Raj Subedi](https://rajsubediresearch.com) · PhD Student, Epidemiology · Georgia State University
+> Developed by [Raj Subedi](https://rajsubediresearch.github.io) · PhD Student, Epidemiology · Georgia State University
 ---
 
 ## Overview
@@ -101,5 +101,4 @@ Zenodo. https://doi.org/10.5281/zenodo.20074293
 
 **Raj Subedi**  
 PhD Student · Epidemiology · Georgia State University  
-2CI Fellow · Graduate Research Assistant, Chowell Lab  
-🌐 [rajsubediresearch.com](https://rajsubediresearch.com) · [Google Scholar](https://scholar.google.com/citations?user=Lf5R5zwAAAAJ&hl=en&oi=ao) · [GitHub](https://github.com/rajsubediresearch)
+· [GitHub](https://github.com/rajsubediresearch)
